@@ -1,0 +1,7 @@
+*.vcd 
+*.fst 
+*.log 
+*.vstf 
+__pycache__/ 
+sim_build/ 
+work/
