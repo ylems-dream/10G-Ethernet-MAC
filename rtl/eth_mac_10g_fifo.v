@@ -520,6 +520,13 @@ module icg_cell (
     end
   end
 
-  assign clk_out = clk_in & en_latched;
+assign clk_out = clk_in & en_latched;
+`ifdef COCOTB_SIM
+initial begin
+    $dumpfile("eth_mac_10g_fifo.vcd");
+    $dumpvars(0, eth_mac_10g_fifo);
+end
+`endif
 
+endmodule
 endmodule
