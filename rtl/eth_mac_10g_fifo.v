@@ -118,7 +118,8 @@ module eth_mac_10g_fifo #
     output wire                        rx_fifo_overflow,
     output wire                        rx_fifo_bad_frame,
     output wire                        rx_fifo_good_frame,
-
+    output wire                        gated_tx_clk,
+    output wire                        gated_rx_clk,
     /*
      * PTP clock
      */
