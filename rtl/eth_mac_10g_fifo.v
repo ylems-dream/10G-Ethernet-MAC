@@ -61,7 +61,7 @@ module eth_mac_10g_fifo #
     parameter TX_USER_WIDTH = (PTP_TS_ENABLE ? (TX_PTP_TAG_ENABLE ? PTP_TAG_WIDTH : 0) + (TX_PTP_TS_CTRL_IN_TUSER ? 1 : 0) : 0) + 1,
     parameter RX_USER_WIDTH = (PTP_TS_ENABLE ? PTP_TS_WIDTH : 0) + 1
     output wire                        gated_tx_clk,
-    output wire                        gated_rx_clk,
+    output wire                        gated_rx_clk
 )
 (
     input  wire                        rx_clk,
