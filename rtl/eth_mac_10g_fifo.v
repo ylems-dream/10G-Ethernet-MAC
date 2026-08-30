@@ -159,8 +159,6 @@ wire                       tx_axis_ptp_ts_valid;
 // =========================================================================
 // LOW-POWER ADDITION: Dynamic Clock Gating Setup
 // =========================================================================
-wire gated_tx_clk;
-wire gated_rx_clk;
 
 // Gate TX clock when TX logic is disabled via configuration
 icg_cell tx_icg (
