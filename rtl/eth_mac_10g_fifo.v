@@ -511,16 +511,19 @@ module icg_cell (
     output wire clk_out
 );
 
-  reg en_latched;
+  // Drive clock enable dynamically based on config AND valid data/FIFO state
+wire tx_clk_en = cfg_tx_enable && (tx_axis_tvalid || !tx_fifo_empty);
 
-  // Active-low latch prevents glitches on clk_out when 'en' toggles
-  always @(clk_in or en) begin
-    if (!clk_in) begin
-      en_latched <= en;
+reg en_latched;
+
+// Active-low latch prevents glitches on gated_tx_clk when 'tx_clk_en' toggles
+always @(tx_clk or tx_clk_en) begin
+    if (!tx_clk) begin
+        en_latched <= tx_clk_en;
     end
-  end
+end
 
-assign clk_out = clk_in & en_latched;
+assign gated_tx_clk = tx_clk & en_latched;
 `ifdef COCOTB_SIM
 initial begin
     $dumpfile("eth_mac_10g_fifo.vcd");
