@@ -30,7 +30,7 @@ THE SOFTWARE.
 
 /*
  * AXI4-Stream XGMII frame transmitter (AXI in, XGMII out)
- * Modified with explicit clock enable inference for low-power optimization.
+ * Modified with explicit clock enable inference and Operand Isolation on FCS/CRC logic.
  */
 module axis_xgmii_tx_64 #
 (
@@ -122,7 +122,7 @@ localparam [2:0]
     STATE_FCS_1 = 3'd3,
     STATE_FCS_2 = 3'd4,
     STATE_ERR = 3'd5,
-    STATE_IFG = 3 me6;
+    STATE_IFG = 3'd6;
 
 reg [2:0] state_reg = STATE_IDLE, state_next;
 
@@ -166,6 +166,10 @@ reg m_axis_ptp_ts_borrow_reg = 1'b0;
 reg [31:0] crc_state_reg[7:0];
 wire [31:0] crc_state_next[7:0];
 
+// Isolated signals for FCS Operand Isolation
+wire [DATA_WIDTH-1:0] s_tdata_isolated;
+wire [31:0] crc_state_isolated;
+
 reg [4+16-1:0] last_ts_reg = 0;
 reg [4+16-1:0] ts_inc_reg = 0;
 
@@ -197,6 +201,10 @@ assign clk_en = (state_reg != STATE_IDLE) || s_axis_tvalid || cfg_tx_enable || r
 assign crc_en = update_crc || reset_crc || rst;
 assign ptp_en = PTP_TS_ENABLE && (frame_start_reg || m_axis_ptp_ts_valid_int_reg || rst);
 
+// Operand Isolation Logic: Freeze LFSR inputs when CRC is inactive
+assign s_tdata_isolated = update_crc ? s_tdata_reg : {DATA_WIDTH{1'b0}};
+assign crc_state_isolated = update_crc ? crc_state_reg[7] : 32'd0;
+
 generate
     genvar n;
 
@@ -211,8 +219,8 @@ generate
             .STYLE("AUTO")
         )
         eth_crc (
-            .data_in(s_tdata_reg[0 +: 8*(n+1)]),
-            .state_in(crc_state_reg[7]),
+            .data_in(s_tdata_isolated[0 +: 8*(n+1)]),
+            .state_in(crc_state_isolated),
             .data_out(),
             .state_out(crc_state_next[n])
         );
