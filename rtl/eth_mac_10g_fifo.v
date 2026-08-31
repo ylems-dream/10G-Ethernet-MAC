@@ -512,8 +512,8 @@ module icg_cell (
 );
 
   // Drive clock enable dynamically based on config AND valid data/FIFO state
-wire tx_clk_en = cfg_tx_enable && (tx_axis_tvalid || !tx_fifo_empty);
-
+wire tx_clk_en = cfg_tx_enable && (tx_axis_tvalid || tx_fifo_axis_tvalid);
+    
 reg en_latched;
 
 // Active-low latch prevents glitches on gated_tx_clk when 'tx_clk_en' toggles
