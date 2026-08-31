@@ -30,6 +30,7 @@ THE SOFTWARE.
 
 /*
  * AXI4-Stream Ethernet FCS inserter (64 bit datapath)
+ * Modified with Low-Power Operand Isolation
  */
 module axis_eth_fcs_insert_64 #
 (
@@ -85,13 +86,13 @@ reg [7:0]  fcs_s_tkeep;
 
 reg [63:0] fcs_m_tdata_0;
 reg [63:0] fcs_m_tdata_1;
-reg [7:0] fcs_m_tkeep_0;
-reg [7:0] fcs_m_tkeep_1;
+reg [7:0]  fcs_m_tkeep_0;
+reg [7:0]  fcs_m_tkeep_1;
 
 reg [15:0] frame_ptr_reg = 16'd0, frame_ptr_next;
 
 reg [63:0] last_cycle_tdata_reg = 64'd0, last_cycle_tdata_next;
-reg [7:0] last_cycle_tkeep_reg = 8'd0, last_cycle_tkeep_next;
+reg [7:0]  last_cycle_tkeep_reg = 8'd0, last_cycle_tkeep_next;
 
 reg busy_reg = 1'b0;
 
@@ -118,8 +119,18 @@ reg        m_axis_tuser_int;
 wire       m_axis_tready_int_early;
 
 assign s_axis_tready = s_axis_tready_reg;
-
 assign busy = busy_reg;
+
+// -----------------------------------------------------------------------------
+// Operand Isolation Masking:
+// Forces bus zeroes during IPG/invalid cycles to freeze LFSR XOR switching.
+// -----------------------------------------------------------------------------
+integer j;
+always @* begin
+    for (j = 0; j < 8; j = j + 1) begin
+        s_axis_tdata_masked[j*8 +: 8] = (s_axis_tkeep[j] && s_axis_tvalid) ? s_axis_tdata[j*8 +: 8] : 8'd0;
+    end
+end
 
 lfsr #(
     .LFSR_WIDTH(32),
@@ -278,15 +289,6 @@ function [7:0] count2keep;
         4'd8: count2keep = 8'b11111111;
     endcase
 endfunction
-
-// Mask input data
-integer j;
-
-always @* begin
-    for (j = 0; j < 8; j = j + 1) begin
-        s_axis_tdata_masked[j*8 +: 8] = s_axis_tkeep[j] ? s_axis_tdata[j*8 +: 8] : 8'd0;
-    end
-end
 
 // FCS cycle calculation
 always @* begin
@@ -704,9 +706,9 @@ always @(posedge clk) begin
 
     if (store_axis_int_to_temp) begin
         temp_m_axis_tdata_reg <= m_axis_tdata_int;
-        temp_m_axis_tkeep_reg <= m_axis_tkeep_int;
-        temp_m_axis_tlast_reg <= m_axis_tlast_int;
-        temp_m_axis_tuser_reg <= m_axis_tuser_int;
+        temp_m_axis_tkeep_reg <= temp_m_axis_tkeep_int;
+        temp_m_axis_tlast_reg <= temp_m_axis_tlast_int;
+        temp_m_axis_tuser_reg <= temp_m_axis_tuser_int;
     end
 
     if (rst) begin
