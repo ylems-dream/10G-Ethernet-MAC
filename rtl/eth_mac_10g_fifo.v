@@ -62,43 +62,43 @@ module eth_mac_10g_fifo #
     parameter RX_USER_WIDTH = (PTP_TS_ENABLE ? PTP_TS_WIDTH : 0) + 1
 )
 (
-    output wire                        gated_tx_clk,
-    output wire                        gated_rx_clk,
-    input  wire                        rx_clk,
-    input  wire                        rx_rst,
-    input  wire                        tx_clk,
-    input  wire                        tx_rst,
-    input  wire                        logic_clk,
-    input  wire                        logic_rst,
-    input  wire                        ptp_sample_clk,
+    output wire                         gated_tx_clk,
+    output wire                         gated_rx_clk,
+    input  wire                         rx_clk,
+    input  wire                         rx_rst,
+    input  wire                         tx_clk,
+    input  wire                         tx_rst,
+    input  wire                         logic_clk,
+    input  wire                         logic_rst,
+    input  wire                         ptp_sample_clk,
 
     /*
      * AXI input
      */
     input  wire [AXIS_DATA_WIDTH-1:0] tx_axis_tdata,
     input  wire [AXIS_KEEP_WIDTH-1:0] tx_axis_tkeep,
-    input  wire                        tx_axis_tvalid,
-    output wire                        tx_axis_tready,
-    input  wire                        tx_axis_tlast,
-    input  wire [TX_USER_WIDTH-1:0]   tx_axis_tuser,
+    input  wire                         tx_axis_tvalid,
+    output wire                         tx_axis_tready,
+    input  wire                         tx_axis_tlast,
+    input  wire [TX_USER_WIDTH-1:0]    tx_axis_tuser,
 
     /*
      * Transmit timestamp output
      */
     output wire [PTP_TS_WIDTH-1:0]    m_axis_tx_ptp_ts_96,
-    output wire [PTP_TAG_WIDTH-1:0]   m_axis_tx_ptp_ts_tag,
-    output wire                        m_axis_tx_ptp_ts_valid,
-    input  wire                        m_axis_tx_ptp_ts_ready,
+    output wire [PTP_TAG_WIDTH-1:0]    m_axis_tx_ptp_ts_tag,
+    output wire                         m_axis_tx_ptp_ts_valid,
+    input  wire                         m_axis_tx_ptp_ts_ready,
 
     /*
      * AXI output
      */
     output wire [AXIS_DATA_WIDTH-1:0] rx_axis_tdata,
     output wire [AXIS_KEEP_WIDTH-1:0] rx_axis_tkeep,
-    output wire                        rx_axis_tvalid,
-    input  wire                        rx_axis_tready,
-    output wire                        rx_axis_tlast,
-    output wire [RX_USER_WIDTH-1:0]   rx_axis_tuser,
+    output wire                         rx_axis_tvalid,
+    input  wire                         rx_axis_tready,
+    output wire                         rx_axis_tlast,
+    output wire [RX_USER_WIDTH-1:0]    rx_axis_tuser,
 
     /*
      * XGMII interface
@@ -111,27 +111,27 @@ module eth_mac_10g_fifo #
     /*
      * Status
      */
-    output wire                        tx_error_underflow,
-    output wire                        tx_fifo_overflow,
-    output wire                        tx_fifo_bad_frame,
-    output wire                        tx_fifo_good_frame,
-    output wire                        rx_error_bad_frame,
-    output wire                        rx_error_bad_fcs,
-    output wire                        rx_fifo_overflow,
-    output wire                        rx_fifo_bad_frame,
-    output wire                        rx_fifo_good_frame,
+    output wire                         tx_error_underflow,
+    output wire                         tx_fifo_overflow,
+    output wire                         tx_fifo_bad_frame,
+    output wire                         tx_fifo_good_frame,
+    output wire                         rx_error_bad_frame,
+    output wire                         rx_error_bad_fcs,
+    output wire                         rx_fifo_overflow,
+    output wire                         rx_fifo_bad_frame,
+    output wire                         rx_fifo_good_frame,
     /*
      * PTP clock
      */
     input  wire [PTP_TS_WIDTH-1:0]    ptp_ts_96,
-    input  wire                        ptp_ts_step,
+    input  wire                         ptp_ts_step,
 
     /*
      * Configuration
      */
     input  wire [7:0]                  cfg_ifg,
-    input  wire                        cfg_tx_enable,
-    input  wire                        cfg_rx_enable
+    input  wire                         cfg_tx_enable,
+    input  wire                         cfg_rx_enable
 );
 
 localparam KEEP_WIDTH = DATA_WIDTH/8;
@@ -160,17 +160,21 @@ wire                       tx_axis_ptp_ts_valid;
 // LOW-POWER ADDITION: Dynamic Clock Gating Setup
 // =========================================================================
 
-// Gate TX clock when TX logic is disabled via configuration
+// Dynamic Enable: Gates clock when disabled OR when no packet data is actively flowing out of the FIFO
+wire tx_clk_en = cfg_tx_enable && (tx_fifo_axis_tvalid || tx_rst);
+wire rx_clk_en = cfg_rx_enable && (rx_fifo_axis_tvalid || rx_rst);
+
+// Gate TX clock using the ICG block
 icg_cell tx_icg (
     .clk_in(tx_clk),
-    .en(cfg_tx_enable),
+    .en(tx_clk_en),
     .clk_out(gated_tx_clk)
 );
 
-// Gate RX clock when RX logic is disabled via configuration
+// Gate RX clock using the ICG block
 icg_cell rx_icg (
     .clk_in(rx_clk),
-    .en(cfg_rx_enable),
+    .en(rx_clk_en),
     .clk_out(gated_rx_clk)
 );
 
@@ -247,7 +251,7 @@ if (PTP_TS_ENABLE) begin : tx_ptp
     tx_ptp_cdc (
         .input_clk(logic_clk),
         .input_rst(logic_rst),
-        .output_clk(gated_tx_clk), // FIXED: Connected to gated_tx_clk
+        .output_clk(gated_tx_clk),
         .output_rst(tx_rst),
         .sample_clk(ptp_sample_clk),
         .input_ts(ptp_ts_96),
@@ -271,7 +275,7 @@ if (PTP_TS_ENABLE) begin : tx_ptp
     )
     tx_ptp_ts_fifo (
         // AXI input
-        .s_clk(gated_tx_clk), // FIXED: Connected to gated_tx_clk
+        .s_clk(gated_tx_clk),
         .s_rst(tx_rst),
         .s_axis_tdata(tx_axis_ptp_ts_96),
         .s_axis_tkeep(0),
@@ -322,7 +326,7 @@ if (PTP_TS_ENABLE) begin : rx_ptp
     rx_ptp_cdc (
         .input_clk(logic_clk),
         .input_rst(logic_rst),
-        .output_clk(gated_rx_clk), // FIXED: Connected to gated_rx_clk
+        .output_clk(gated_rx_clk),
         .output_rst(rx_rst),
         .sample_clk(ptp_sample_clk),
         .input_ts(ptp_ts_96),
@@ -358,9 +362,9 @@ eth_mac_10g #(
     .RX_USER_WIDTH(RX_USER_WIDTH)
 )
 eth_mac_10g_inst (
-    .tx_clk(gated_tx_clk), // FIXED: Connected to gated_tx_clk
+    .tx_clk(gated_tx_clk),
     .tx_rst(tx_rst),
-    .rx_clk(gated_rx_clk), // FIXED: Connected to gated_rx_clk
+    .rx_clk(gated_rx_clk),
     .rx_rst(rx_rst),
 
     .tx_axis_tdata(tx_fifo_axis_tdata),
@@ -429,7 +433,7 @@ tx_fifo (
     .s_axis_tdest(0),
     .s_axis_tuser(tx_axis_tuser),
     // AXI output
-    .m_clk(gated_tx_clk), // FIXED: Connected to gated_tx_clk
+    .m_clk(gated_tx_clk),
     .m_rst(tx_rst),
     .m_axis_tdata(tx_fifo_axis_tdata),
     .m_axis_tkeep(tx_fifo_axis_tkeep),
@@ -470,7 +474,7 @@ axis_async_fifo_adapter #(
 )
 rx_fifo (
     // AXI input
-    .s_clk(gated_rx_clk), // FIXED: Connected to gated_rx_clk
+    .s_clk(gated_rx_clk),
     .s_rst(rx_rst),
     .s_axis_tdata(rx_fifo_axis_tdata),
     .s_axis_tkeep(rx_fifo_axis_tkeep),
@@ -500,34 +504,34 @@ rx_fifo (
     .m_status_good_frame(rx_fifo_good_frame)
 );
 
-endmodule
-
-`resetall
-
-// Behavioral model for Integrated Clock Gating (ICG)
-module icg_cell (
-    input  wire clk_in,
-    input  wire en,
-    output wire clk_out
-);
-
-  // Dynamic gating strictly when packet data is actively arriving on AXI-Stream
-wire tx_clk_en = cfg_tx_enable && tx_axis_tvalid;  
-reg en_latched;
-
-// Active-low latch prevents glitches on gated_tx_clk when 'tx_clk_en' toggles
-always @(tx_clk or tx_clk_en) begin
-    if (!tx_clk) begin
-        en_latched <= tx_clk_en;
-    end
-end
-
-assign gated_tx_clk = tx_clk & en_latched;
+// VCD Trace Dumper for Simulation
 `ifdef COCOTB_SIM
 initial begin
     $dumpfile("eth_mac_10g_fifo.vcd");
     $dumpvars(0, eth_mac_10g_fifo);
 end
 `endif
+
+endmodule
+
+`resetall
+
+// Standard Behavioral Model for Integrated Clock Gating (ICG)
+module icg_cell (
+    input  wire clk_in,
+    input  wire en,
+    output wire clk_out
+);
+
+reg en_latched;
+
+// Negative-edge latch prevents dynamic glitching on clk_out when 'en' changes
+always @(clk_in or en) begin
+    if (!clk_in) begin
+        en_latched <= en;
+    end
+end
+
+assign clk_out = clk_in & en_latched;
 
 endmodule
