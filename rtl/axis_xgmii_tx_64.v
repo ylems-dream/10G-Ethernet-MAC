@@ -30,6 +30,7 @@ THE SOFTWARE.
 
 /*
  * AXI4-Stream XGMII frame transmitter (AXI in, XGMII out)
+ * Modified with explicit clock enable inference for low-power optimization.
  */
 module axis_xgmii_tx_64 #
 (
@@ -121,7 +122,7 @@ localparam [2:0]
     STATE_FCS_1 = 3'd3,
     STATE_FCS_2 = 3'd4,
     STATE_ERR = 3'd5,
-    STATE_IFG = 3'd6;
+    STATE_IFG = 3 me6;
 
 reg [2:0] state_reg = STATE_IDLE, state_next;
 
@@ -174,6 +175,11 @@ reg [CTRL_WIDTH-1:0] xgmii_txc_reg = {CTRL_WIDTH{1'b1}}, xgmii_txc_next;
 reg start_packet_reg = 2'b00;
 reg error_underflow_reg = 1'b0, error_underflow_next;
 
+// Inferred Clock Enables
+wire clk_en;
+wire crc_en;
+wire ptp_en;
+
 assign s_axis_tready = s_axis_tready_reg;
 
 assign xgmii_txd = xgmii_txd_reg;
@@ -185,6 +191,11 @@ assign m_axis_ptp_ts_valid = PTP_TS_ENABLE || PTP_TAG_ENABLE ? m_axis_ptp_ts_val
 
 assign start_packet = start_packet_reg;
 assign error_underflow = error_underflow_reg;
+
+// Clock Enable Inference Logic
+assign clk_en = (state_reg != STATE_IDLE) || s_axis_tvalid || cfg_tx_enable || rst;
+assign crc_en = update_crc || reset_crc || rst;
+assign ptp_en = PTP_TS_ENABLE && (frame_start_reg || m_axis_ptp_ts_valid_int_reg || rst);
 
 generate
     genvar n;
@@ -529,125 +540,159 @@ always @* begin
     endcase
 end
 
+// Synchronous sequential block with explicit gated clock enable inference
 always @(posedge clk) begin
-    state_reg <= state_next;
-
-    swap_lanes_reg <= swap_lanes_next;
-
-    frame_start_reg <= frame_start_next;
-    frame_reg <= frame_next;
-    frame_error_reg <= frame_error_next;
-    frame_min_count_reg <= frame_min_count_next;
-
-    ifg_count_reg <= ifg_count_next;
-    deficit_idle_count_reg <= deficit_idle_count_next;
-
-    s_tdata_reg <= s_tdata_next;
-    s_empty_reg <= s_empty_next;
-
-    s_axis_tready_reg <= s_axis_tready_next;
-
-    m_axis_ptp_ts_valid_reg <= 1'b0;
-    m_axis_ptp_ts_valid_int_reg <= 1'b0;
-
-    start_packet_reg <= 2'b00;
-    error_underflow_reg <= error_underflow_next;
-
-    if (PTP_TS_ENABLE && PTP_TS_FMT_TOD) begin
-        m_axis_ptp_ts_valid_reg <= m_axis_ptp_ts_valid_int_reg;
-        m_axis_ptp_ts_adj_reg[15:0] <= m_axis_ptp_ts_reg[15:0];
-        {m_axis_ptp_ts_borrow_reg, m_axis_ptp_ts_adj_reg[45:16]} <= $signed({1'b0, m_axis_ptp_ts_reg[45:16]}) - $signed(31'd1000000000);
-        m_axis_ptp_ts_adj_reg[47:46] <= 0;
-        m_axis_ptp_ts_adj_reg[95:48] <= m_axis_ptp_ts_reg[95:48] + 1;
-    end
-
-    if (frame_start_reg) begin
-        if (swap_lanes_reg) begin
-            if (PTP_TS_ENABLE) begin
-                if (PTP_TS_FMT_TOD) begin
-                    m_axis_ptp_ts_reg[45:0] <= ptp_ts[45:0] + (ts_inc_reg >> 1);
-                    m_axis_ptp_ts_reg[95:48] <= ptp_ts[95:48];
-                end else begin
-                    m_axis_ptp_ts_reg <= ptp_ts + (ts_inc_reg >> 1);
-                end
-            end
-            start_packet_reg <= 2'b10;
-        end else begin
-            if (PTP_TS_ENABLE) begin
-                m_axis_ptp_ts_reg <= ptp_ts;
-            end
-            start_packet_reg <= 2'b01;
-        end
-        if (PTP_TS_ENABLE) begin
-            if (PTP_TS_CTRL_IN_TUSER) begin
-                m_axis_ptp_ts_tag_reg <= s_axis_tuser >> 2;
-                if (PTP_TS_FMT_TOD) begin
-                    m_axis_ptp_ts_valid_int_reg <= s_axis_tuser[1];
-                end else begin
-                    m_axis_ptp_ts_valid_reg <= s_axis_tuser[1];
-                end
-            end else begin
-                m_axis_ptp_ts_tag_reg <= s_axis_tuser >> 1;
-                if (PTP_TS_FMT_TOD) begin
-                    m_axis_ptp_ts_valid_int_reg <= 1'b1;
-                end else begin
-                    m_axis_ptp_ts_valid_reg <= 1'b1;
-                end
-            end
-        end
-    end
-
-    crc_state_reg[0] <= crc_state_next[0];
-    crc_state_reg[1] <= crc_state_next[1];
-    crc_state_reg[2] <= crc_state_next[2];
-    crc_state_reg[3] <= crc_state_next[3];
-    crc_state_reg[4] <= crc_state_next[4];
-    crc_state_reg[5] <= crc_state_next[5];
-    crc_state_reg[6] <= crc_state_next[6];
-
-    if (update_crc) begin
-        crc_state_reg[7] <= crc_state_next[7];
-    end
-
-    if (reset_crc) begin
-        crc_state_reg[7] <= 32'hFFFFFFFF;
-    end
-
-    swap_txd <= xgmii_txd_next[63:32];
-    swap_txc <= xgmii_txc_next[7:4];
-
-    if (swap_lanes_reg) begin
-        xgmii_txd_reg <= {xgmii_txd_next[31:0], swap_txd};
-        xgmii_txc_reg <= {xgmii_txc_next[3:0], swap_txc};
-    end else begin
-        xgmii_txd_reg <= xgmii_txd_next;
-        xgmii_txc_reg <= xgmii_txc_next;
-    end
-
-    last_ts_reg <= ptp_ts;
-    ts_inc_reg <= ptp_ts - last_ts_reg;
-
     if (rst) begin
         state_reg <= STATE_IDLE;
 
         frame_start_reg <= 1'b0;
         frame_reg <= 1'b0;
+        frame_error_reg <= 1'b0;
+        frame_min_count_reg <= {MIN_LEN_WIDTH{1'b0}};
 
         swap_lanes_reg <= 1'b0;
 
         ifg_count_reg <= 8'd0;
         deficit_idle_count_reg <= 2'd0;
 
-        s_axis_tready_reg <= 1'b0;
+        s_tdata_reg <= {DATA_WIDTH{1'b0}};
+        s_empty_reg <= {EMPTY_WIDTH{1'b0}};
 
-        m_axis_ptp_ts_valid_reg <= 1'b0;
-        m_axis_ptp_ts_valid_int_reg <= 1'b0;
+        s_axis_tready_reg <= 1'b0;
 
         xgmii_txd_reg <= {CTRL_WIDTH{XGMII_IDLE}};
         xgmii_txc_reg <= {CTRL_WIDTH{1'b1}};
 
         start_packet_reg <= 2'b00;
         error_underflow_reg <= 1'b0;
+        
+        swap_txd <= 32'd0;
+        swap_txc <= 4'd0;
+    end else if (clk_en) begin
+        state_reg <= state_next;
+
+        swap_lanes_reg <= swap_lanes_next;
+
+        frame_start_reg <= frame_start_next;
+        frame_reg <= frame_next;
+        frame_error_reg <= frame_error_next;
+        frame_min_count_reg <= frame_min_count_next;
+
+        ifg_count_reg <= ifg_count_next;
+        deficit_idle_count_reg <= deficit_idle_count_next;
+
+        s_tdata_reg <= s_tdata_next;
+        s_empty_reg <= s_empty_next;
+
+        s_axis_tready_reg <= s_axis_tready_next;
+
+        start_packet_reg <= 2'b00;
+        error_underflow_reg <= error_underflow_next;
+
+        swap_txd <= xgmii_txd_next[63:32];
+        swap_txc <= xgmii_txc_next[7:4];
+
+        if (swap_lanes_reg) begin
+            xgmii_txd_reg <= {xgmii_txd_next[31:0], swap_txd};
+            xgmii_txc_reg <= {xgmii_txc_next[3:0], swap_txc};
+        end else begin
+            xgmii_txd_reg <= xgmii_txd_next;
+            xgmii_txc_reg <= xgmii_txc_next;
+        end
+    end
+end
+
+// Dedicated PTP timestamp gating block
+always @(posedge clk) begin
+    if (rst) begin
+        m_axis_ptp_ts_valid_reg <= 1'b0;
+        m_axis_ptp_ts_valid_int_reg <= 1'b0;
+        m_axis_ptp_ts_reg <= {PTP_TS_WIDTH{1'b0}};
+        m_axis_ptp_ts_adj_reg <= {PTP_TS_WIDTH{1'b0}};
+        m_axis_ptp_ts_tag_reg <= {PTP_TAG_WIDTH{1'b0}};
+        m_axis_ptp_ts_borrow_reg <= 1'b0;
+        last_ts_reg <= 20'd0;
+        ts_inc_reg <= 20'd0;
+    end else if (ptp_en) begin
+        m_axis_ptp_ts_valid_reg <= 1'b0;
+        m_axis_ptp_ts_valid_int_reg <= 1'b0;
+
+        if (PTP_TS_ENABLE && PTP_TS_FMT_TOD) begin
+            m_axis_ptp_ts_valid_reg <= m_axis_ptp_ts_valid_int_reg;
+            m_axis_ptp_ts_adj_reg[15:0] <= m_axis_ptp_ts_reg[15:0];
+            {m_axis_ptp_ts_borrow_reg, m_axis_ptp_ts_adj_reg[45:16]} <= $signed({1'b0, m_axis_ptp_ts_reg[45:16]}) - $signed(31'd1000000000);
+            m_axis_ptp_ts_adj_reg[47:46] <= 0;
+            m_axis_ptp_ts_adj_reg[95:48] <= m_axis_ptp_ts_reg[95:48] + 1;
+        end
+
+        if (frame_start_reg) begin
+            if (swap_lanes_reg) begin
+                if (PTP_TS_ENABLE) begin
+                    if (PTP_TS_FMT_TOD) begin
+                        m_axis_ptp_ts_reg[45:0] <= ptp_ts[45:0] + (ts_inc_reg >> 1);
+                        m_axis_ptp_ts_reg[95:48] <= ptp_ts[95:48];
+                    end else begin
+                        m_axis_ptp_ts_reg <= ptp_ts + (ts_inc_reg >> 1);
+                    end
+                end
+                start_packet_reg <= 2'b10;
+            end else begin
+                if (PTP_TS_ENABLE) begin
+                    m_axis_ptp_ts_reg <= ptp_ts;
+                end
+                start_packet_reg <= 2'b01;
+            end
+            if (PTP_TS_ENABLE) begin
+                if (PTP_TS_CTRL_IN_TUSER) begin
+                    m_axis_ptp_ts_tag_reg <= s_axis_tuser >> 2;
+                    if (PTP_TS_FMT_TOD) begin
+                        m_axis_ptp_ts_valid_int_reg <= s_axis_tuser[1];
+                    end else begin
+                        m_axis_ptp_ts_valid_reg <= s_axis_tuser[1];
+                    end
+                end else begin
+                    m_axis_ptp_ts_tag_reg <= s_axis_tuser >> 1;
+                    if (PTP_TS_FMT_TOD) begin
+                        m_axis_ptp_ts_valid_int_reg <= 1'b1;
+                    end else begin
+                        m_axis_ptp_ts_valid_reg <= 1'b1;
+                    end
+                end
+            end
+        end
+
+        last_ts_reg <= ptp_ts;
+        ts_inc_reg <= ptp_ts - last_ts_reg;
+    end
+end
+
+// Dedicated CRC register gating block
+always @(posedge clk) begin
+    if (rst) begin
+        crc_state_reg[0] <= 32'd0;
+        crc_state_reg[1] <= 32'd0;
+        crc_state_reg[2] <= 32'd0;
+        crc_state_reg[3] <= 32'd0;
+        crc_state_reg[4] <= 32'd0;
+        crc_state_reg[5] <= 32'd0;
+        crc_state_reg[6] <= 32'd0;
+        crc_state_reg[7] <= 32'hFFFFFFFF;
+    end else if (crc_en) begin
+        crc_state_reg[0] <= crc_state_next[0];
+        crc_state_reg[1] <= crc_state_next[1];
+        crc_state_reg[2] <= crc_state_next[2];
+        crc_state_reg[3] <= crc_state_next[3];
+        crc_state_reg[4] <= crc_state_next[4];
+        crc_state_reg[5] <= crc_state_next[5];
+        crc_state_reg[6] <= crc_state_next[6];
+
+        if (update_crc) begin
+            crc_state_reg[7] <= crc_state_next[7];
+        end
+
+        if (reset_crc) begin
+            crc_state_reg[7] <= 32'hFFFFFFFF;
+        end
     end
 end
 
