@@ -161,8 +161,8 @@ wire                       tx_axis_ptp_ts_valid;
 // =========================================================================
 
 // Dynamic Enable: Gates clock when disabled OR when no packet data is actively flowing out of the FIFO
-wire tx_clk_en = cfg_tx_enable && (tx_fifo_axis_tvalid || tx_rst);
-wire rx_clk_en = cfg_rx_enable && (rx_fifo_axis_tvalid || rx_rst);
+wire tx_clk_en = tx_rst || cfg_tx_enable;
+wire rx_clk_en = rx_rst || cfg_rx_enable;
 
 // Gate TX clock using the ICG block
 icg_cell tx_icg (
