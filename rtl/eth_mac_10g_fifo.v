@@ -160,9 +160,9 @@ wire                       tx_axis_ptp_ts_valid;
 // LOW-POWER ADDITION: Dynamic Clock Gating Setup
 // =========================================================================
 
-// Dynamic Enable: Gates clock when disabled OR when no packet data is actively flowing out of the FIFO
-wire tx_clk_en = tx_rst || cfg_tx_enable;
-wire rx_clk_en = rx_rst || cfg_rx_enable;
+// FORCE enable line to directly follow top-level port/reset
+wire tx_clk_en = tx_rst | cfg_tx_enable;
+wire rx_clk_en = rx_rst | cfg_rx_enable;
 
 // Gate TX clock using the ICG block
 icg_cell tx_icg (
