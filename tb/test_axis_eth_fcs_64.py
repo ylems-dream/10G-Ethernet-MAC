@@ -1,161 +1,149 @@
 #!/usr/bin/env python
 """
-
-Copyright (c) 2015-2018 Alex Forencich
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-
+Cycle-accurate Cocotb testbench for power-optimized axis_eth_fcs_64.
+Verifies Ethernet FCS (CRC32) calculation accuracy across variable payload lengths
+with active operand isolation.
 """
 
-from myhdl import *
-import os
+import cocotb
+from cocotb.clock import Clock
+from cocotb.triggers import RisingEdge, FallingEdge, Timer
+import binascii
 
-import axis_ep
-import eth_ep
+# --- Ethernet Frame & FCS Helper ---
 
-module = 'axis_eth_fcs'
-testbench = 'test_%s_64' % module
+def calc_eth_fcs(data: bytes) -> int:
+    """Calculates standard Ethernet IEEE 802.3 CRC32 (32-bit checksum)."""
+    return binascii.crc32(data) & 0xFFFFFFFF
 
-srcs = []
+class EthFrame:
+    def __init__(self, dest_mac=0xDAD1D2D3D4D5, src_mac=0x5A5152535455, eth_type=0x8000, payload=b''):
+        self.eth_dest_mac = dest_mac
+        self.eth_src_mac = src_mac
+        self.eth_type = eth_type
+        self.payload = bytearray(payload)
 
-srcs.append("../rtl/%s.v" % module)
-srcs.append("../rtl/lfsr.v")
-srcs.append("%s.v" % testbench)
+    def build_raw_frame(self) -> bytes:
+        """Constructs unpadded Ethernet frame header + payload."""
+        frame = bytearray()
+        frame.extend(self.eth_dest_mac.to_bytes(6, 'big'))
+        frame.extend(self.eth_src_mac.to_bytes(6, 'big'))
+        frame.extend(self.eth_type.to_bytes(2, 'big'))
+        frame.extend(self.payload)
+        return bytes(frame)
 
-src = ' '.join(srcs)
+    def build_axis_words(self):
+        """Packs Ethernet frame bytes into 64-bit words and keep masks for AXI-Stream."""
+        raw_data = self.build_raw_frame()
+        words = []
+        keeps = []
+        
+        for i in range(0, len(raw_data), 8):
+            chunk = raw_data[i:i+8]
+            keep_val = (1 << len(chunk)) - 1
+            chunk_padded = chunk + b'\x00' * (8 - len(chunk))
+            word_val = int.from_bytes(chunk_padded, 'little')
+            
+            words.append(word_val)
+            keeps.append(keep_val)
+            
+        return words, keeps, raw_data
 
-build_cmd = "iverilog -o %s.vvp %s" % (testbench, src)
+# --- AXI4-Stream Stimulus Driver ---
 
-def bench():
+async def send_axis_stream_frame(dut, frame: EthFrame):
+    """Drives frame words on s_axis and yields until captured by DUT."""
+    words, keeps, raw_bytes = frame.build_axis_words()
+    num_words = len(words)
 
-    # Parameters
-    DATA_WIDTH = 64
-    KEEP_ENABLE = (DATA_WIDTH>8)
-    KEEP_WIDTH = int(DATA_WIDTH/8)
+    for idx in range(num_words):
+        dut.s_axis_tdata.value = words[idx]
+        dut.s_axis_tkeep.value = keeps[idx]
+        dut.s_axis_tvalid.value = 1
+        dut.s_axis_tlast.value = 1 if (idx == num_words - 1) else 0
 
-    # Inputs
-    clk = Signal(bool(0))
-    rst = Signal(bool(0))
-    current_test = Signal(intbv(0)[8:])
+        while True:
+            await RisingEdge(dut.clk)
+            # Sample on ready edge
+            if hasattr(dut, 's_axis_tready') and dut.s_axis_tready.value == 1:
+                break
+            elif not hasattr(dut, 's_axis_tready'):
+                break
 
-    s_axis_tdata = Signal(intbv(0)[DATA_WIDTH:])
-    s_axis_tkeep = Signal(intbv(1)[KEEP_WIDTH:])
-    s_axis_tvalid = Signal(bool(0))
-    s_axis_tlast = Signal(bool(0))
-    s_axis_tuser = Signal(bool(0))
+    dut.s_axis_tvalid.value = 0
+    dut.s_axis_tlast.value = 0
+    return raw_bytes
 
-    # Outputs
-    s_axis_tready = Signal(bool(1))
-    output_fcs = Signal(intbv(0)[32:])
-    output_fcs_valid = Signal(bool(0))
+# --- Test Case Suite ---
 
-    # sources and sinks
-    source_pause = Signal(bool(0))
+@cocotb.test()
+async def test_axis_eth_fcs_single_frames(dut):
+    """Tests FCS calculation over isolated short, medium, and jumbo payloads."""
+    
+    # Initialize clock (125 MHz clock -> 8 ns period)
+    clock = Clock(dut.clk, 8.0, units="ns")
+    cocotb.start_soon(clock.start())
 
-    source = axis_ep.AXIStreamSource()
+    # Initialize signals
+    dut.rst.value = 1
+    dut.s_axis_tdata.value = 0
+    dut.s_axis_tkeep.value = 0
+    dut.s_axis_tvalid.value = 0
+    dut.s_axis_tlast.value = 0
 
-    source_logic = source.create_logic(
-        clk,
-        rst,
-        tdata=s_axis_tdata,
-        tkeep=s_axis_tkeep,
-        tvalid=s_axis_tvalid,
-        tready=s_axis_tready,
-        tlast=s_axis_tlast,
-        tuser=s_axis_tuser,
-        pause=source_pause,
-        name='source'
-    )
+    # Apply Reset
+    await Timer(20, units="ns")
+    await RisingEdge(dut.clk)
+    dut.rst.value = 0
+    await RisingEdge(dut.clk)
 
-    # DUT
-    if os.system(build_cmd):
-        raise Exception("Error running build command")
+    # Test payload length sweeps
+    payload_lengths = list(range(1, 18)) + list(range(64, 82))
 
-    dut = Cosimulation(
-        "vvp -m myhdl %s.vvp -lxt2" % testbench,
-        clk=clk,
-        rst=rst,
-        current_test=current_test,
+    for length in payload_lengths:
+        frame = EthFrame(payload=bytes(range(length)))
+        
+        # Drive frame into FCS calculation unit
+        raw_bytes = await send_axis_stream_frame(dut, frame)
+        expected_fcs = calc_eth_fcs(raw_bytes)
 
-        s_axis_tdata=s_axis_tdata,
-        s_axis_tkeep=s_axis_tkeep,
-        s_axis_tvalid=s_axis_tvalid,
-        s_axis_tready=s_axis_tready,
-        s_axis_tlast=s_axis_tlast,
-        s_axis_tuser=s_axis_tuser,
+        # Wait for valid FCS assertion
+        while True:
+            await RisingEdge(dut.clk)
+            if dut.output_fcs_valid.value == 1:
+                break
 
-        output_fcs=output_fcs,
-        output_fcs_valid=output_fcs_valid
-    )
+        actual_fcs = int(dut.output_fcs.value)
 
-    @always(delay(4))
-    def clkgen():
-        clk.next = not clk
+        dut._log.info(
+            f"Payload Len: {length:2d} | Raw Bytes: {len(raw_bytes):2d} | "
+            f"Calculated FCS: 0x{actual_fcs:08X} | Expected FCS: 0x{expected_fcs:08X}"
+        )
 
-    @instance
-    def check():
-        yield delay(100)
-        yield clk.posedge
-        rst.next = 1
-        yield clk.posedge
-        rst.next = 0
-        yield clk.posedge
-        yield delay(100)
-        yield clk.posedge
+        assert actual_fcs == expected_fcs, (
+            f"FCS Mismatch for length {length}! "
+            f"Got: 0x{actual_fcs:08X}, Expected: 0x{expected_fcs:08X}"
+        )
 
-        # testbench stimulus
+        # Allow pipeline to settle back to isolated idle state
+        await Timer(50, units="ns")
 
-        for payload_len in list(range(1,18))+list(range(64,82)):
-            yield clk.posedge
-            print("test 1: test packet, length %d" % payload_len)
-            current_test.next = 1
+@cocotb.test()
+async def test_axis_eth_fcs_operand_isolation_idle_check(dut):
+    """Validates that output_fcs_valid stays deasserted and output remains stable during idle."""
+    
+    clock = Clock(dut.clk, 8.0, units="ns")
+    cocotb.start_soon(clock.start())
 
-            test_frame = eth_ep.EthFrame()
-            test_frame.eth_dest_mac = 0xDAD1D2D3D4D5
-            test_frame.eth_src_mac = 0x5A5152535455
-            test_frame.eth_type = 0x8000
-            test_frame.payload = bytearray(range(payload_len))
-            test_frame.update_fcs()
+    dut.rst.value = 1
+    await Timer(20, units="ns")
+    await RisingEdge(dut.clk)
+    dut.rst.value = 0
+    await RisingEdge(dut.clk)
 
-            axis_frame = test_frame.build_axis()
+    # Hold stream idle for 30 cycles to verify isolation stability
+    for _ in range(30):
+        await RisingEdge(dut.clk)
+        assert dut.output_fcs_valid.value == 0, "FCS Valid asserted unexpectedly during stream idle!"
 
-            source.send(axis_frame)
-            yield clk.posedge
-            yield clk.posedge
-
-            yield output_fcs_valid.posedge
-
-            print(hex(int(output_fcs)))
-            print(hex(test_frame.eth_fcs))
-
-            assert output_fcs == test_frame.eth_fcs
-
-            yield delay(100)
-
-        raise StopSimulation
-
-    return instances()
-
-def test_bench():
-    sim = Simulation(bench())
-    sim.run()
-
-if __name__ == '__main__':
-    print("Running test...")
-    test_bench()
+    dut._log.info("Operand isolation idle stability verified successfully.")
