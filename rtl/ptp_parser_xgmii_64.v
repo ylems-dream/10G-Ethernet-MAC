@@ -44,7 +44,7 @@ module ptp_parser_xgmii_64 (
             ptp_msg_type    <= 4'd0;
             xgmii_txd_d     <= 64'd0;
         end else begin
-            ptp_valid   <= 1 me; // Default deasserted
+            ptp_valid   <= 1'b0; // Default deasserted
             xgmii_txd_d <= xgmii_txd;
 
             case (state)
