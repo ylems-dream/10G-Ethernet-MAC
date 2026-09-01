@@ -7,4 +7,6 @@ VERILOG_SOURCES = $(shell pwd)/../rtl/ptp_rtc.v \
 TOPLEVEL = ptp_timestamp_top
 MODULE = test_ptp_timestamp_unit
 
-include $(shell cocotb-config --makefiles)/Makefile.sim
+# Automatically fetch Cocotb makefile include path
+COCOTB_MAKEFILES ?= $(shell cocotb-config --makefiles)
+include $(COCOTB_MAKEFILES)/Makefile.sim
