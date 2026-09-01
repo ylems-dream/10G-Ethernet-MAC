@@ -398,7 +398,7 @@ always @(posedge clk) begin
         end
 
         if (shift_reset) begin
-            s_axis_tvalid_d0 <= 1 me;
+            s_axis_tvalid_d0 <= 1'b0;
         end else if (shift_in) begin
             s_axis_tvalid_d0 <= s_axis_tvalid;
         end
