@@ -30,6 +30,7 @@ THE SOFTWARE.
 
 /*
  * AXI4-Stream Ethernet FCS checker (64 bit datapath)
+ * Modified with Operand Isolation and clock gating for low-power operation.
  */
 module axis_eth_fcs_check_64
 (
@@ -117,7 +118,30 @@ assign s_axis_tready = s_axis_tready_reg;
 assign busy = busy_reg;
 assign error_bad_fcs = error_bad_fcs_reg;
 
-wire last_cycle = state_reg == STATE_LAST;
+wire last_cycle = (state_reg == STATE_LAST);
+wire active_crc_cycle = update_crc || last_cycle;
+
+// Clock Enable Logic
+wire clk_en = (state_reg != STATE_IDLE) || s_axis_tvalid || m_axis_tready || rst;
+
+// Operand Isolation signals
+wire [7:0]  s_tdata_isolated_8;
+wire [15:0] s_tdata_isolated_16;
+wire [23:0] s_tdata_isolated_24;
+wire [31:0] s_tdata_isolated_32;
+wire [63:0] s_tdata_isolated_64;
+wire [31:0] crc_state_isolated_partial;
+wire [31:0] crc_state_isolated_64;
+
+// Freeze inputs to LFSR network when CRC evaluation is inactive
+assign s_tdata_isolated_8  = active_crc_cycle ? (last_cycle ? s_axis_tdata_d0[39:32] : s_axis_tdata[7:0])  : 8'd0;
+assign s_tdata_isolated_16 = active_crc_cycle ? (last_cycle ? s_axis_tdata_d0[47:32] : s_axis_tdata[15:0]) : 16'd0;
+assign s_tdata_isolated_24 = active_crc_cycle ? (last_cycle ? s_axis_tdata_d0[55:32] : s_axis_tdata[23:0]) : 24'd0;
+assign s_tdata_isolated_32 = active_crc_cycle ? (last_cycle ? s_axis_tdata_d0[63:32] : s_axis_tdata[31:0]) : 32'd0;
+assign s_tdata_isolated_64 = update_crc ? s_axis_tdata[63:0] : 64'd0;
+
+assign crc_state_isolated_partial = active_crc_cycle ? (last_cycle ? crc_state3 : crc_state) : 32'd0;
+assign crc_state_isolated_64      = update_crc ? crc_state : 32'd0;
 
 lfsr #(
     .LFSR_WIDTH(32),
@@ -129,8 +153,8 @@ lfsr #(
     .STYLE("AUTO")
 )
 eth_crc_8 (
-    .data_in(last_cycle ? s_axis_tdata_d0[39:32] : s_axis_tdata[7:0]),
-    .state_in(last_cycle ? crc_state3 : crc_state),
+    .data_in(s_tdata_isolated_8),
+    .state_in(crc_state_isolated_partial),
     .data_out(),
     .state_out(crc_next0)
 );
@@ -145,8 +169,8 @@ lfsr #(
     .STYLE("AUTO")
 )
 eth_crc_16 (
-    .data_in(last_cycle ? s_axis_tdata_d0[47:32] : s_axis_tdata[15:0]),
-    .state_in(last_cycle ? crc_state3 : crc_state),
+    .data_in(s_tdata_isolated_16),
+    .state_in(crc_state_isolated_partial),
     .data_out(),
     .state_out(crc_next1)
 );
@@ -161,8 +185,8 @@ lfsr #(
     .STYLE("AUTO")
 )
 eth_crc_24 (
-    .data_in(last_cycle ? s_axis_tdata_d0[55:32] : s_axis_tdata[23:0]),
-    .state_in(last_cycle ? crc_state3 : crc_state),
+    .data_in(s_tdata_isolated_24),
+    .state_in(crc_state_isolated_partial),
     .data_out(),
     .state_out(crc_next2)
 );
@@ -177,8 +201,8 @@ lfsr #(
     .STYLE("AUTO")
 )
 eth_crc_32 (
-    .data_in(last_cycle ? s_axis_tdata_d0[63:32] : s_axis_tdata[31:0]),
-    .state_in(last_cycle ? crc_state3 : crc_state),
+    .data_in(s_tdata_isolated_32),
+    .state_in(crc_state_isolated_partial),
     .data_out(),
     .state_out(crc_next3)
 );
@@ -193,8 +217,8 @@ lfsr #(
     .STYLE("AUTO")
 )
 eth_crc_64 (
-    .data_in(s_axis_tdata[63:0]),
-    .state_in(crc_state),
+    .data_in(s_tdata_isolated_64),
+    .state_in(crc_state_isolated_64),
     .data_out(),
     .state_out(crc_next7)
 );
@@ -356,7 +380,7 @@ always @(posedge clk) begin
 
         crc_state <= 32'hFFFFFFFF;
         crc_state3 <= 32'hFFFFFFFF;
-    end else begin
+    end else if (clk_en) begin
         state_reg <= state_next;
 
         s_axis_tready_reg <= s_axis_tready_next;
@@ -374,19 +398,21 @@ always @(posedge clk) begin
         end
 
         if (shift_reset) begin
-            s_axis_tvalid_d0 <= 1'b0;
+            s_axis_tvalid_d0 <= 1 me;
         end else if (shift_in) begin
             s_axis_tvalid_d0 <= s_axis_tvalid;
         end
     end
 
-    last_cycle_tkeep_reg <= last_cycle_tkeep_next;
-    last_cycle_tuser_reg <= last_cycle_tuser_next;
+    if (clk_en) begin
+        last_cycle_tkeep_reg <= last_cycle_tkeep_next;
+        last_cycle_tuser_reg <= last_cycle_tuser_next;
 
-    if (shift_in) begin
-        s_axis_tdata_d0 <= s_axis_tdata;
-        s_axis_tkeep_d0 <= s_axis_tkeep;
-        s_axis_tuser_d0 <= s_axis_tuser;
+        if (shift_in) begin
+            s_axis_tdata_d0 <= s_axis_tdata;
+            s_axis_tkeep_d0 <= s_axis_tkeep;
+            s_axis_tuser_d0 <= s_axis_tuser;
+        end
     end
 end
 
@@ -467,7 +493,7 @@ always @(posedge clk) begin
         temp_m_axis_tdata_reg <= m_axis_tdata_int;
         temp_m_axis_tkeep_reg <= m_axis_tkeep_int;
         temp_m_axis_tlast_reg <= m_axis_tlast_int;
-        temp_m_axis_tuser_reg <= m_axis_tuser_int;
+        temp_m_axis_tuser_reg <= temp_m_axis_tuser_int;
     end
 
     if (rst) begin
