@@ -37,6 +37,14 @@ module ptp_ts_fifo #(
 
     reg [DATA_WIDTH-1:0] mem [0:FIFO_DEPTH-1];
 
+    // Initialize entire memory to ZERO at simulation start to prevent 'x' propagation
+    integer k;
+    initial begin
+        for (k = 0; k < FIFO_DEPTH; k = k + 1) begin
+            mem[k] = {DATA_WIDTH{1'b0}};
+        end
+    end
+
     // Pack write payload: {ptp_ts_96, ptp_sequence_id, ptp_msg_type}
     wire [DATA_WIDTH-1:0] wr_data = {ptp_ts_96, ptp_sequence_id, ptp_msg_type};
 
@@ -44,13 +52,11 @@ module ptp_ts_fifo #(
     assign fifo_empty = (fifo_count == 0);
     assign fifo_full  = (fifo_count == FIFO_DEPTH);
 
-    // Combinational Read Outputs (Directly exposes current memory location)
+    // Combinational Read Outputs
     wire [DATA_WIDTH-1:0] rd_data = mem[rd_ptr];
     assign out_ts_96       = rd_data[115:20];
     assign out_sequence_id = rd_data[19:4];
     assign out_msg_type    = rd_data[3:0];
-
-    integer i;
 
     // Synchronous Write & Pointer Logic
     always @(posedge clk or posedge rst) begin
@@ -58,9 +64,6 @@ module ptp_ts_fifo #(
             wr_ptr     <= 0;
             rd_ptr     <= 0;
             fifo_count <= 0;
-            for (i = 0; i < FIFO_DEPTH; i = i + 1) begin
-                mem[i] <= {DATA_WIDTH{1'b0}};
-            end
         end else begin
             // Enqueue on valid trigger if FIFO is not full
             if (ptp_valid && !fifo_full) begin
