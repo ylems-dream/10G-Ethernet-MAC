@@ -1,69 +1,83 @@
 /*
- * XGMII 64-Bit In-Line PTP Frame Detector / Parser
- * Snoops XGMII 64-bit data stream to detect IEEE 1588 PTP messages and assert
- * a single-cycle ptp_valid pulse.
+ * PTP Timestamp Capture & Sideband FIFO
+ * Latches 96-bit RTC timestamp on ptp_valid pulse and queues metadata
+ * for CPU/host readout.
  */
 
 `timescale 1ns / 1ps
 
-module ptp_parser_xgmii_64 (
-    input  wire        clk,
-    input  wire        rst,
+module ptp_ts_fifo #(
+    parameter FIFO_DEPTH = 16,
+    parameter DATA_WIDTH = 96 + 16 + 4 // [96-bit TS | 16-bit Seq ID | 4-bit Msg Type]
+) (
+    input  wire                  clk,
+    input  wire                  rst,
 
-    // 64-bit XGMII Interface Snoop Ports
-    input  wire [63:0] xgmii_txd,
-    input  wire [7:0]  xgmii_txc,
+    // Capture Trigger Interface (from ptp_parser)
+    input  wire                  ptp_valid,
+    input  wire [15:0]           ptp_sequence_id,
+    input  wire [3:0]            ptp_msg_type,
 
-    // PTP Detection Signals
-    output reg         ptp_valid,
-    output reg  [15:0] ptp_sequence_id,
-    output reg  [3:0]  ptp_msg_type
+    // RTC Counter Interface (from ptp_rtc)
+    input  wire [95:0]           ptp_ts_96,
+
+    // Host Readout Sideband Interface
+    input  wire                  rd_en,
+    output reg  [95:0]           out_ts_96,
+    output reg  [15:0]           out_sequence_id,
+    output reg  [3:0]            out_msg_type,
+    output wire                  fifo_empty,
+    output wire                  fifo_full
 );
 
-    // XGMII Control Character Definitions
-    localparam XGMII_SOP = 8'hFB; // Start of Frame Control Byte
-    localparam [15:0] ETHERTYPE_PTP = 16'h88F7;
+    // FIFO Pointers & Memory Array
+    reg [$clog2(FIFO_DEPTH)-1:0] wr_ptr;
+    reg [$clog2(FIFO_DEPTH)-1:0] rd_ptr;
+    reg [$clog2(FIFO_DEPTH):0]   fifo_count;
 
-    // FSM States
-    localparam STATE_IDLE    = 2'b00;
-    localparam STATE_HEADER1 = 2'b01;
-    localparam STATE_HEADER2 = 2'b10;
+    reg [DATA_WIDTH-1:0] mem [0:FIFO_DEPTH-1];
 
-    reg [1:0] state;
+    // Pack write payload: {ptp_ts_96, ptp_sequence_id, ptp_msg_type}
+    wire [DATA_WIDTH-1:0] wr_data = {ptp_ts_96, ptp_sequence_id, ptp_msg_type};
 
+    // Status Flags
+    assign fifo_empty = (fifo_count == 0);
+    assign fifo_full  = (fifo_count == FIFO_DEPTH);
+
+    integer i;
+
+    // Synchronous Write, Read & Register Logic
     always @(posedge clk or posedge rst) begin
         if (rst) begin
-            state           <= STATE_IDLE;
-            ptp_valid       <= 1'b0;
-            ptp_sequence_id <= 16'd0;
-            ptp_msg_type    <= 4'd0;
+            wr_ptr          <= 0;
+            rd_ptr          <= 0;
+            fifo_count      <= 0;
+            out_ts_96       <= 96'd0;
+            out_sequence_id <= 16'd0;
+            out_msg_type    <= 4'd0;
+            for (i = 0; i < FIFO_DEPTH; i = i + 1) begin
+                mem[i] <= {DATA_WIDTH{1'b0}};
+            end
         end else begin
-            ptp_valid <= 1'b0; // Default deasserted
+            // Enqueue on valid trigger if FIFO is not full
+            if (ptp_valid && !fifo_full) begin
+                mem[wr_ptr] <= wr_data;
+                wr_ptr      <= wr_ptr + 1'b1;
+            end
 
-            case (state)
-                STATE_IDLE: begin
-                    // Detect SOP on Lane 0
-                    if (xgmii_txc[0] && (xgmii_txd[7:0] == XGMII_SOP)) begin
-                        state <= STATE_HEADER1;
-                    end
-                end
+            // Dequeue and latch outputs on host read request if FIFO is not empty
+            if (rd_en && !fifo_empty) begin
+                out_ts_96       <= mem[rd_ptr][115:20];
+                out_sequence_id <= mem[rd_ptr][19:4];
+                out_msg_type    <= mem[rd_ptr][3:0];
+                rd_ptr          <= rd_ptr + 1'b1;
+            end
 
-                STATE_HEADER1: begin
-                    // Move to second word of packet header
-                    state <= STATE_HEADER2;
-                end
-
-                STATE_HEADER2: begin
-                    // EtherType 0x88F7 check (Bytes 3:2 of this word)
-                    if (xgmii_txd[31:16] == ETHERTYPE_PTP) begin
-                        ptp_valid       <= 1'b1;
-                        ptp_msg_type    <= xgmii_txd[35:32];
-                        ptp_sequence_id <= xgmii_txd[63:48];
-                    end
-                    state <= STATE_IDLE;
-                end
-
-                default: state <= STATE_IDLE;
+            // Track occupied depth
+            case ({ (ptp_valid && !fifo_full), (rd_en && !fifo_empty) })
+                2'b10: fifo_count <= fifo_count + 1'b1;
+                2'b01: fifo_count <= fifo_count - 1'b1;
+                default: fifo_count <= fifo_count;
             endcase
         end
     end
