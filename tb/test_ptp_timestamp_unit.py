@@ -64,9 +64,14 @@ async def test_ptp_timestamp_capture(dut):
     await RisingEdge(dut.clk)
     dut.rd_en.value = 0
     await RisingEdge(dut.clk)
+    
+    # Print raw bitstrings before integer conversion to catch the 'x'
+    dut._log.info(f"Raw TS bitstring:  {dut.out_ts_96.value}")
+    dut._log.info(f"Raw Seq bitstring: {dut.out_sequence_id.value}")
+    dut._log.info(f"Raw Type bitstring:{dut.out_msg_type.value}")
 
-    captured_ts = int(dut.out_ts_96.value)
-    captured_seq = int(dut.out_sequence_id.value)
+    captured_ts   = int(dut.out_ts_96.value)
+    captured_seq  = int(dut.out_sequence_id.value)
     captured_type = int(dut.out_msg_type.value)
 
     dut._log.info(f"Captured Timestamp: {hex(captured_ts)}")
