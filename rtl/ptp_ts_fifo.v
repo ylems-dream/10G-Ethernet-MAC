@@ -23,9 +23,9 @@ module ptp_ts_fifo #(
 
     // Host Readout Sideband Interface
     input  wire                  rd_en,
-    output reg  [95:0]           out_ts_96,
-    output reg  [15:0]           out_sequence_id,
-    output reg  [3:0]            out_msg_type,
+    output wire [95:0]           out_ts_96,
+    output wire [15:0]           out_sequence_id,
+    output wire [3:0]            out_msg_type,
     output wire                  fifo_empty,
     output wire                  fifo_full
 );
@@ -44,17 +44,20 @@ module ptp_ts_fifo #(
     assign fifo_empty = (fifo_count == 0);
     assign fifo_full  = (fifo_count == FIFO_DEPTH);
 
+    // Combinational Read Outputs (Directly exposes current memory location)
+    wire [DATA_WIDTH-1:0] rd_data = mem[rd_ptr];
+    assign out_ts_96       = rd_data[115:20];
+    assign out_sequence_id = rd_data[19:4];
+    assign out_msg_type    = rd_data[3:0];
+
     integer i;
 
-    // Synchronous Write, Read & Pointer Logic
+    // Synchronous Write & Pointer Logic
     always @(posedge clk or posedge rst) begin
         if (rst) begin
-            wr_ptr          <= 0;
-            rd_ptr          <= 0;
-            fifo_count      <= 0;
-            out_ts_96       <= 96'd0;
-            out_sequence_id <= 16'd0;
-            out_msg_type    <= 4'd0;
+            wr_ptr     <= 0;
+            rd_ptr     <= 0;
+            fifo_count <= 0;
             for (i = 0; i < FIFO_DEPTH; i = i + 1) begin
                 mem[i] <= {DATA_WIDTH{1'b0}};
             end
@@ -65,12 +68,9 @@ module ptp_ts_fifo #(
                 wr_ptr      <= wr_ptr + 1'b1;
             end
 
-            // Dequeue and latch outputs on host read request if FIFO is not empty
+            // Dequeue on host read request if FIFO is not empty
             if (rd_en && !fifo_empty) begin
-                out_ts_96       <= mem[rd_ptr][115:20];
-                out_sequence_id <= mem[rd_ptr][19:4];
-                out_msg_type    <= mem[rd_ptr][3:0];
-                rd_ptr          <= rd_ptr + 1'b1;
+                rd_ptr <= rd_ptr + 1'b1;
             end
 
             // Track occupied depth
