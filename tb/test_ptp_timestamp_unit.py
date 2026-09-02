@@ -2,7 +2,7 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, Timer
 
-async def send_xgmii_ptp_frame(dut, sequence_id=0x1234, msg_type=0x0):
+async def send_xgmii_ptp_frame(dut, sequence_id=0x1001, msg_type=0x0):
     """Generates XGMII cycles representing a PTP over Layer-2 Ethernet packet."""
     
     # 1. SOP Cycle (Start of Frame)
@@ -16,9 +16,6 @@ async def send_xgmii_ptp_frame(dut, sequence_id=0x1234, msg_type=0x0):
     await RisingEdge(dut.clk)
 
     # 3. Header Word 2: Lower 32-bits Src MAC + EtherType 0x88F7 + MsgType + Version
-    # EtherType = 0x88F7 at bytes [3:2]
-    # MsgType = lower nibble of byte [4]
-    # Sequence ID = bytes [7:6]
     word2 = (sequence_id << 48) | (0x02 << 40) | (msg_type << 32) | (0x88F7 << 16) | 0x5455
     dut.xgmii_txc.value = 0x00
     dut.xgmii_txd.value = word2
@@ -54,17 +51,18 @@ async def test_ptp_timestamp_capture(dut):
     dut._log.info("--- Sending PTP Frame 1 (Sync Message) ---")
     await send_xgmii_ptp_frame(dut, sequence_id=0x1001, msg_type=0x0)
 
-    # Wait for parser pipeline to process header
+    # Wait for parser pipeline to process header & push to FIFO
     for _ in range(5):
         await RisingEdge(dut.clk)
 
     # Check FIFO status
     assert dut.fifo_empty.value == 0, "FIFO should not be empty after detecting a PTP packet!"
 
-    # Read captured timestamp from FIFO
+    # Pulse rd_en to trigger read from FIFO memory
     dut.rd_en.value = 1
     await RisingEdge(dut.clk)
     dut.rd_en.value = 0
+    await RisingEdge(dut.clk)
 
     captured_ts = int(dut.out_ts_96.value)
     captured_seq = int(dut.out_sequence_id.value)
