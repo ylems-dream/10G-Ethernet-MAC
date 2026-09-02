@@ -15,8 +15,13 @@ async def send_xgmii_ptp_frame(dut, sequence_id=0x1001, msg_type=0x0):
     dut.xgmii_txd.value = 0x5253DAD1D2D3D4D5
     await RisingEdge(dut.clk)
 
-    # 3. Header Word 2: Lower 32-bits Src MAC + EtherType 0x88F7 + MsgType + Version
-    word2 = (sequence_id << 48) | (0x02 << 40) | (msg_type << 32) | (0x88F7 << 16) | 0x5455
+    # 3. Header Word 2: Lower 32-bits Src MAC (2B) + EtherType 0x88F7 (2B) + MsgType/Ver (1B) + Reserved (1B) + SeqID (2B)
+    seq_hi = (sequence_id >> 8) & 0xFF
+    seq_lo = sequence_id & 0xFF
+    
+    # Pack bytes LSB-first: [SrcMAC_lo(2B) | EtherType(2B) | MsgType(1B) | Reserved(1B) | SeqID(2B)]
+    word2 = (seq_hi << 56) | (seq_lo << 48) | (0x00 << 40) | (msg_type << 32) | (0xF788 << 16) | 0x5455
+    
     dut.xgmii_txc.value = 0x00
     dut.xgmii_txd.value = word2
     await RisingEdge(dut.clk)
