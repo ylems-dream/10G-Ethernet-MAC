@@ -1,12 +1,8 @@
-TOPLEVEL_LANG = verilog
-VERILOG_SOURCES = $(shell pwd)/../rtl/ptp_rtc.v \
-                  $(shell pwd)/../rtl/ptp_parser_xgmii_64.v \
-                  $(shell pwd)/../rtl/ptp_ts_fifo.v \
-                  $(shell pwd)/../rtl/ptp_timestamp_top.v
-
-TOPLEVEL = ptp_timestamp_top
 MODULE = test_ptp_timestamp_unit
+VERILOG_SOURCES = $(PWD)/../rtl/ptp_timestamp_top.v \
+                  $(PWD)/../rtl/ptp_rtc.v \
+                  $(PWD)/../rtl/ptp_parser_xgmii_64.v \
+                  $(PWD)/../rtl/ptp_ts_fifo.v
+TOPLEVEL = ptp_timestamp_top
 
-# Automatically fetch Cocotb makefile include path
-COCOTB_MAKEFILES ?= $(shell cocotb-config --makefiles)
-include $(COCOTB_MAKEFILES)/Makefile.sim
+include $(shell cocotb-config --makefiles)/Makefile.sim
