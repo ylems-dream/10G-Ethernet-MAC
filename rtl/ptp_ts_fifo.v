@@ -65,7 +65,7 @@ module ptp_ts_fifo #(
                 wr_ptr      <= wr_ptr + 1'b1;
             end
 
-            // Dequeue and output data on host read request if FIFO is not empty
+            // Dequeue and latch outputs on host read request if FIFO is not empty
             if (rd_en && !fifo_empty) begin
                 out_ts_96       <= mem[rd_ptr][115:20];
                 out_sequence_id <= mem[rd_ptr][19:4];
