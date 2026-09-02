@@ -16,7 +16,7 @@ async def send_xgmii_ptp_frame(dut, sequence_id=0x1001, msg_type=0x0):
     await RisingEdge(dut.clk)
 
     # 3. Header Word 2: Lower 32-bits Src MAC + EtherType 0x88F7 + MsgType + Version + Seq ID
-    word2 = (sequence_id << 48) | (0x00 << 40) | (msg_type << 32) | (0x88F7 << 16) | 0x5455
+    word2 = (sequence_id << 48) | (0x0200 << 32) | (0x88F7 << 16) | 0x5455
     
     dut.xgmii_txc.value = 0x00
     dut.xgmii_txd.value = word2
