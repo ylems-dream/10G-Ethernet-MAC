@@ -1,3 +1,4 @@
+
 `timescale 1ns / 1ps
 
 module ptp_timestamp_top (
@@ -75,3 +76,4 @@ module ptp_timestamp_top (
     );
 
 endmodule
+
