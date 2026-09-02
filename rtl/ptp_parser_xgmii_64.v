@@ -31,14 +31,14 @@ module ptp_parser_xgmii_64 (
 
     reg [1:0] state;
 
-    always @(posedge clk or posedge rst) begin
+always @(posedge clk or posedge rst) begin
         if (rst) begin
             state           <= STATE_IDLE;
             ptp_valid       <= 1'b0;
             ptp_sequence_id <= 16'd0;
             ptp_msg_type    <= 4'd0;
         end else begin
-            ptp_valid <= 1'b0; // Default deasserted
+            ptp_valid <= 1'b0; // Default pulse deasserted every cycle
 
             case (state)
                 STATE_IDLE: begin
