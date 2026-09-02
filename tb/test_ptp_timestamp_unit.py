@@ -15,16 +15,14 @@ async def send_xgmii_ptp_frame(dut, sequence_id=0x1001, msg_type=0x0):
     dut.xgmii_txd.value = 0x5253DAD1D2D3D4D5
     await RisingEdge(dut.clk)
 
-    # 3. Header Word 2: Byte-swap sequence ID for Big-Endian network parsing
-    seq_byteswap = ((sequence_id & 0x00FF) << 8) | ((sequence_id & 0xFF00) >> 8)
-    
-    # Pack: [SeqID_swapped (bits 63:48) | MsgType/Ver (bits 47:32) | EtherType (bits 31:16) | SrcMAC_lo (bits 15:0)]
-    word2 = (seq_byteswap << 48) | (0x0200 << 32) | (0x88F7 << 16) | 0x5455
+    # 3. Header Word 2: Lower 32-bits Src MAC + EtherType 0x88F7 + MsgType + Version + Seq ID
+    # Pack: [SeqID (bits 63:48) | MsgType/Ver (bits 47:32) | EtherType (bits 31:16) | SrcMAC_lo (bits 15:0)]
+    word2 = (sequence_id << 48) | (0x0200 << 32) | (0x88F7 << 16) | 0x5455
     
     dut.xgmii_txc.value = 0x00
     dut.xgmii_txd.value = word2
     await RisingEdge(dut.clk)
-
+    
     # 4. Idle / End Frame
     dut.xgmii_txc.value = 0xFF
     dut.xgmii_txd.value = 0x0707070707070707
