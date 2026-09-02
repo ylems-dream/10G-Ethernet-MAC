@@ -67,6 +67,11 @@ async def test_ptp_timestamp_capture(dut):
     dut.rd_en.value = 0
     await RisingEdge(dut.clk)
     
+    # Place the diagnostic prints right here (Line 70):
+    dut._log.info(f"Parser Output Sequence ID: {hex(int(dut.parser_inst.ptp_sequence_id.value))}")
+    dut._log.info(f"Parser Output Valid:       {dut.parser_inst.ptp_valid.value}")
+    dut._log.info(f"FIFO Output Sequence ID:   {hex(int(dut.out_sequence_id.value))}")
+    
     # Print raw bitstrings before integer conversion to catch the 'x'
     dut._log.info(f"Raw TS bitstring:  {dut.out_ts_96.value}")
     dut._log.info(f"Raw Seq bitstring: {dut.out_sequence_id.value}")
