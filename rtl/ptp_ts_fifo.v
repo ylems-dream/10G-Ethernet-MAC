@@ -52,11 +52,24 @@ module ptp_ts_fifo #(
     assign fifo_empty = (fifo_count == 0);
     assign fifo_full  = (fifo_count == FIFO_DEPTH);
 
-    // Combinational Read Outputs
-    wire [DATA_WIDTH-1:0] rd_data = mem[rd_ptr];
-    assign out_ts_96       = rd_data[115:20];
-    assign out_sequence_id = rd_data[19:4];
-    assign out_msg_type    = rd_data[3:0];
+    // Registered Read Outputs
+    // Latches mem[rd_ptr] on the same edge that rd_ptr advances, so the
+    // captured word is held stable for the host to sample on the cycle
+    // *after* rd_en is asserted (instead of disappearing the instant the
+    // pointer moves past it, as a purely combinational read would).
+    reg [DATA_WIDTH-1:0] rd_data_reg;
+
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            rd_data_reg <= {DATA_WIDTH{1'b0}};
+        end else if (rd_en && !fifo_empty) begin
+            rd_data_reg <= mem[rd_ptr];
+        end
+    end
+
+    assign out_ts_96       = rd_data_reg[115:20];
+    assign out_sequence_id = rd_data_reg[19:4];
+    assign out_msg_type    = rd_data_reg[3:0];
 
     // Synchronous Write & Pointer Logic
     always @(posedge clk or posedge rst) begin
