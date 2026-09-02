@@ -30,11 +30,11 @@ async def send_xgmii_ptp_frame(dut, sequence_id=0x1001, msg_type=0x0):
 async def test_ptp_timestamp_capture(dut):
     """Verifies end-to-end RTC incrementing, PTP header parsing, and FIFO timestamp capture."""
     
-    # 156.25 MHz clock (~6.4 ns period)
+    # 1. Start clock FIRST so synchronous resets can register
     clock = Clock(dut.clk, 6.4, units="ns")
     cocotb.start_soon(clock.start())
 
-    # Initialize configuration & signals
+    # 2. Drive reset & signal configurations
     dut.rst.value = 1
     dut.period_ns.value = 6
     dut.period_fns.value = 0x6666
@@ -42,9 +42,10 @@ async def test_ptp_timestamp_capture(dut):
     dut.xgmii_txc.value = 0xFF
     dut.xgmii_txd.value = 0x0707070707070707
 
-    # Reset System
-    await Timer(20, units="ns")
-    await RisingEdge(dut.clk)
+    # Hold reset across active clock edges
+    for _ in range(5):
+        await RisingEdge(dut.clk)
+        
     dut.rst.value = 0
     await RisingEdge(dut.clk)
 
@@ -58,7 +59,7 @@ async def test_ptp_timestamp_capture(dut):
     # Check FIFO status
     assert dut.fifo_empty.value == 0, "FIFO should not be empty after detecting a PTP packet!"
 
-    # Pulse rd_en to trigger read from FIFO memory
+    # Read from FIFO memory
     dut.rd_en.value = 1
     await RisingEdge(dut.clk)
     dut.rd_en.value = 0
@@ -74,5 +75,4 @@ async def test_ptp_timestamp_capture(dut):
 
     assert captured_seq == 0x1001, f"Expected Sequence ID 0x1001, got {hex(captured_seq)}"
     assert captured_type == 0x0, f"Expected Msg Type 0x0, got {hex(captured_type)}"
-
     dut._log.info("SUCCESS: PTP Timestamp Unit end-to-end test passed!")
