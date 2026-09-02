@@ -26,6 +26,11 @@ module ptp_timestamp_top (
     wire [3:0]  ptp_msg_type;
     wire [95:0] ptp_ts_96;
 
+    // Dummy wires to cleanly terminate unused output ports
+    wire [47:0] unused_rtc_sec;
+    wire [31:0] unused_rtc_ns;
+    wire [15:0] unused_rtc_fns;
+
     // 1. Real-Time Counter
     ptp_rtc rtc_inst (
         .clk(clk),
@@ -36,9 +41,9 @@ module ptp_timestamp_top (
         .adj_ns(8'd0),
         .adj_fns(16'd0),
         .adj_count_neg(1'b0),
-        .ptp_ts_96_sec(),
-        .ptp_ts_96_ns(),
-        .ptp_ts_96_fns(),
+        .ptp_ts_96_sec(unused_rtc_sec),
+        .ptp_ts_96_ns(unused_rtc_ns),
+        .ptp_ts_96_fns(unused_rtc_fns),
         .ptp_ts_96(ptp_ts_96)
     );
 
