@@ -70,5 +70,6 @@ module ptp_rtc #(
             end
         end
     end
-
+    assign ptp_ts_96 = {ptp_ts_96_sec, ptp_ts_96_ns, ptp_ts_96_fns};
+    
 endmodule
