@@ -1,3 +1,4 @@
+
 /*
  * PTP Timestamp Capture & Sideband FIFO
  * Latches 96-bit RTC timestamp on ptp_valid pulse and queues metadata
@@ -99,3 +100,5 @@ module ptp_ts_fifo #(
     end
 
 endmodule
+
+
