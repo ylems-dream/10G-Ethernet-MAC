@@ -392,12 +392,10 @@ always @(posedge clk) begin
 
     // capture timestamps
     if (xgmii_start_swap) begin
-        start_packet_reg <= 2'b10;
         if (PTP_TS_FMT_TOD) begin
             ptp_ts_reg[45:0] <= ptp_ts[45:0] + (ts_inc_reg >> 1);
             ptp_ts_reg[95:48] <= ptp_ts[95:48];
         end else begin
-            ptp_ts_reg <= ptp_ts + (ts_inc_reg >> 1);
         end
     end
 
